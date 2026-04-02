@@ -171,7 +171,17 @@ public class Player : MonoBehaviour {
     }
 
     void HandleFlip() {
-        if (isWallSliding || wallJumping) return;
+        if (wallJumping) return;
+
+        if (isWallSliding) {
+            int targetDir = -wallDir;
+            if (facingDir != targetDir) {
+                facingDir = targetDir;
+                transform.rotation = facingDir == -1 ? Quaternion.identity : Quaternion.Euler(0, 180, 0);
+            }
+
+            return;
+        }
 
         if (horizontal > 0 && facingDir != 1) {
             facingDir = 1;
