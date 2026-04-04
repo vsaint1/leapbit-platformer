@@ -3,18 +3,22 @@ using System.Collections;
 
 public class Player : MonoBehaviour {
 
+    private const int RIGHT = 1;
+    private const int LEFT = -1;
+
+
     private enum PlayerState { Idle, Running, Jumping, DoubleJumping, Falling, WallSliding, Knockback }
     private PlayerState currentState;
 
     [Header("Movement")]
-    [SerializeField] private float speed = 5f;
+    [SerializeField] private float speed = 10f;
     [SerializeField] private float acceleration = 15f;
     [SerializeField] private float deceleration = 20f;
     [SerializeField] private float airAcceleration = 8f;
 
     [Header("Jump")]
-    [SerializeField] private float jumpForce = 12f;
-    [SerializeField] private float doubleJumpForce = 10f;
+    [SerializeField] private float jumpForce = 15f;
+    [SerializeField] private float doubleJumpForce = 14f;
     [SerializeField] private float coyoteTime = 0.12f;
     [SerializeField] private float jumpBufferTime = 0.1f;
     [SerializeField] private float fallMultiplier = 2.5f;
@@ -32,12 +36,15 @@ public class Player : MonoBehaviour {
     private int lastWallDir;
 
     [Header("Knockback")]
-    [SerializeField] private Vector2 knockbackForce = new Vector2(5F, 30f);
+    [SerializeField] private Vector2 knockbackForce = new Vector2(5f, 30f);
     [SerializeField] private float knockbackDuration = 0.3f;
     [SerializeField] private float invulnerabilityDuration = 1f;
 
     [Header("Layers")]
     [SerializeField] private LayerMask groundLayer;
+
+    [Header("VFX")]
+    [SerializeField] private GameObject deathEffectPrefab;
 
     private Rigidbody2D rb;
     private Collider2D col;
@@ -50,13 +57,14 @@ public class Player : MonoBehaviour {
     private float horizontal;
     private float vertical;
 
-    private int facingDir = 1;
+    private int facingDir = RIGHT;
     private int wallDir;
     private bool wallJumping;
-    private bool wallJumped;
+    // private bool wallJumped;
 
     private bool isKnockback;
     private bool isInvulnerable;
+
 
     void Start() {
         rb = GetComponent<Rigidbody2D>();
@@ -66,6 +74,10 @@ public class Player : MonoBehaviour {
 
     void Update() {
         if (isKnockback) return;
+
+        if (Input.GetKeyDown(KeyCode.K)) {
+            Kill();
+        }
 
         horizontal = Input.GetAxisRaw("Horizontal");
         vertical = Input.GetAxisRaw("Vertical");
@@ -77,7 +89,9 @@ public class Player : MonoBehaviour {
         isGrounded = CheckGrounded();
         isTouchingWall = CheckWall();
         wallDir = GetWallDir();
-        isWallSliding = isTouchingWall && !isGrounded && rb.linearVelocity.y <= 0 && !wallJumped;
+
+        // wall slide: touching wall, airborne, falling or still, and NOT during wall jump arc
+        isWallSliding = isTouchingWall && !isGrounded && rb.linearVelocity.y <= 0 && !wallJumping;
 
         UpdateTimers();
         HandleLanding();
@@ -97,9 +111,7 @@ public class Player : MonoBehaviour {
         jumpBufferTimer -= Time.deltaTime;
         wallCoyoteTimer -= Time.deltaTime;
 
-        if (isGrounded) {
-            coyoteTimer = coyoteTime;
-        }
+        if (isGrounded) coyoteTimer = coyoteTime;
 
         if (isTouchingWall && !isGrounded) {
             wallCoyoteTimer = wallCoyoteTime;
@@ -108,10 +120,9 @@ public class Player : MonoBehaviour {
     }
 
     void HandleLanding() {
-        if (isGrounded) {
-            canDoubleJump = true;
-            wallJumped = false;
-        }
+        if (!isGrounded) return;
+        canDoubleJump = true;
+        // wallJumped = false;
     }
 
     void UpdateState() {
@@ -145,8 +156,7 @@ public class Player : MonoBehaviour {
 
     void ApplyMovement() {
         if (isWallSliding) {
-            const float ySlideModifier = 0.05f;
-            float slideSpeed = vertical < 0 ? wallSlideSpeed / ySlideModifier : wallSlideSpeed;
+            float slideSpeed = vertical < 0 ? wallSlideSpeed / 0.05f : wallSlideSpeed;
             rb.linearVelocity = new Vector2(rb.linearVelocity.x, -slideSpeed);
             return;
         }
@@ -174,23 +184,19 @@ public class Player : MonoBehaviour {
         if (wallJumping) return;
 
         if (isWallSliding) {
-            int targetDir = -wallDir;
-            if (facingDir != targetDir) {
-                facingDir = targetDir;
-                transform.rotation = facingDir == -1 ? Quaternion.identity : Quaternion.Euler(0, 180, 0);
-            }
-
+            // face toward the wall
+            SetFacing(wallDir);
             return;
         }
 
-        if (horizontal > 0 && facingDir != 1) {
-            facingDir = 1;
-            transform.rotation = Quaternion.identity;
-        }
-        else if (horizontal < 0 && facingDir != -1) {
-            facingDir = -1;
-            transform.rotation = Quaternion.Euler(0, 180, 0);
-        }
+        if (horizontal > 0) SetFacing(RIGHT);
+        else if (horizontal < 0) SetFacing(LEFT);
+    }
+
+    void SetFacing(int dir) {
+        if (facingDir == dir) return;
+        facingDir = dir;
+        transform.rotation = dir == RIGHT ? Quaternion.identity : Quaternion.Euler(0, 180, 0);
     }
 
     void HandleJump() {
@@ -221,7 +227,7 @@ public class Player : MonoBehaviour {
     }
 
     void WallJump() {
-        wallJumped = true;
+        // wallJumped = true;
         canDoubleJump = true;
         wallCoyoteTimer = 0;
         StopCoroutine(nameof(WallJumpRoutine));
@@ -233,8 +239,7 @@ public class Player : MonoBehaviour {
         SetState(PlayerState.Jumping);
 
         int jumpDir = wallDir != 0 ? wallDir : lastWallDir;
-        facingDir = -jumpDir;
-        transform.rotation = facingDir == 1 ? Quaternion.identity : Quaternion.Euler(0, 180, 0);
+        SetFacing(-jumpDir);
         rb.linearVelocity = new Vector2(-jumpDir * wallJumpForce.x, wallJumpForce.y);
 
         yield return new WaitForSeconds(wallJumpDuration);
@@ -247,7 +252,7 @@ public class Player : MonoBehaviour {
 
         Vector2 dir = ((Vector2)transform.position - sourcePosition).normalized;
         rb.linearVelocity = Vector2.zero;
-        rb.AddForce(dir * knockbackForce, ForceMode2D.Impulse);
+        rb.AddForce(new Vector2(dir.x * knockbackForce.x, knockbackForce.y), ForceMode2D.Impulse);
 
         isKnockback = true;
         isInvulnerable = true;
@@ -255,6 +260,16 @@ public class Player : MonoBehaviour {
         animator.SetTrigger("KnockBack");
         StartCoroutine(COR_Knockback());
         StartCoroutine(COR_Invulnerability());
+    }
+
+    public bool IsInvulnerable() {
+        return isInvulnerable;
+    }
+
+    public void Kill() {
+        Destroy(gameObject);
+        GameObject effect = Instantiate(deathEffectPrefab, transform.position, Quaternion.identity);
+        Destroy(effect, 1f);
     }
 
     IEnumerator COR_Knockback() {
@@ -296,8 +311,8 @@ public class Player : MonoBehaviour {
     int GetWallDir() {
         Vector2 originR = new Vector2(col.bounds.max.x, col.bounds.center.y);
         Vector2 originL = new Vector2(col.bounds.min.x, col.bounds.center.y);
-        if (Physics2D.Raycast(originR, Vector2.right, 0.4f, groundLayer).collider != null) return 1;
-        if (Physics2D.Raycast(originL, Vector2.left, 0.4f, groundLayer).collider != null) return -1;
+        if (Physics2D.Raycast(originR, Vector2.right, 0.4f, groundLayer).collider != null) return RIGHT;
+        if (Physics2D.Raycast(originL, Vector2.left, 0.4f, groundLayer).collider != null) return LEFT;
         return 0;
     }
 }
